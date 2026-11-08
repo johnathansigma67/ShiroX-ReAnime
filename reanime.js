@@ -1,4 +1,4 @@
-/* Independent ReAnime ShiroX integration, experimental v0.4.0.
+/* Independent ReAnime ShiroX integration, experimental v0.4.1.
    Uses /api/v1/search, /api/v1/anime/<slug>/episodes and /api/flix/<anilist_id>/<ep>. No credentials or telemetry. */
 var ReAnimeNew = (function () {
   'use strict';
@@ -31,6 +31,7 @@ var ReAnimeNew = (function () {
     var t = first(item, ['title','name','english_title']) || '';
     return typeof t === 'string' ? t : first(t, ['english','romaji','native']) || '';
   }
+  function originOf(url) { return String(url).split('/').slice(0,3).join('/'); }
   async function load(path) {
     var url = BASE + path;
     var headers = {
@@ -143,13 +144,13 @@ var ReAnimeNew = (function () {
       var link = String(choices[i].dataLink || choices[i].url || '');
       var label = String(choices[i].serverName || ('server ' + (i+1)));
       if (!/^https:\/\//i.test(link)) { notes.push(label + ': bad link'); continue; }
-      if (playableUrl(link)) return JSON.stringify({streams:[{title:'SUB',streamUrl:link,headers:{Referer:BASE+'/'} }],subtitle:'',allSubtitles:[]});
+      if (playableUrl(link)) return JSON.stringify({streams:[{title:'SUB',streamUrl:link,headers:{Referer:BASE+'/', Origin:BASE} }],subtitle:'',allSubtitles:[]});
       try {
         var cap = await networkFetch(link, {timeoutSeconds:14, headers:{Referer:BASE+'/'}, returnHTML:true, returnCookies:false, waitForSelectors:['video'], clickSelectors:['.art-icon-play[aria-label="Play"]','button[aria-label="Play"]'], maxWaitTime:4});
         var urls = arr(cap && cap.requests).map(function(r){return typeof r==='string'?r:r&&r.url;});
         if (cap && cap.cutoffUrl) urls.push(cap.cutoffUrl);
         var media = urls.filter(playableUrl)[0] || urls.filter(looseMediaUrl)[0];
-        if (media) return JSON.stringify({streams:[{title:'SUB '+label,streamUrl:media,headers:{Referer:link.split('/').slice(0,3).join('/')+'/'} }],subtitle:'',allSubtitles:[]});
+        if (media) return JSON.stringify({streams:[{title:'SUB '+label,streamUrl:media,headers:{Referer:originOf(link)+'/', Origin:originOf(link)} }],subtitle:'',allSubtitles:[]});
         notes.push(label + ': ' + urls.length + ' requests, no media URL');
       } catch(err) {
         var msg = String(err.message||err).slice(0,100);
