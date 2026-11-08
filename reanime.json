@@ -1,10 +1,10 @@
 {
   "sourceName": "ReAnime Rebuild (Experimental)",
   "author": {"name": "Unofficial community integration"},
-  "version": "0.3.2",
+  "version": "0.4.0",
   "baseUrl": "https://reanime.to",
-  "searchBaseUrl": "https://reanime.to/api/search?q=%s",
-  "scriptUrl": "https://raw.githubusercontent.com/johnathansigma67/ShiroX-ReAnime/main/reanime.js?v=0.3.2",
+  "searchBaseUrl": "https://reanime.to/api/v1/search?q=%s",
+  "scriptUrl": "https://raw.githubusercontent.com/johnathansigma67/ShiroX-ReAnime/main/reanime.js?v=0.4.0",
   "type": "anime",
   "asyncJS": true,
   "streamType": "HLS/MP4",
