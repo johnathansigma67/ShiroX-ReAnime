@@ -3,7 +3,7 @@
   "author": {"name": "Unofficial community integration"},
   "version": "0.3.0",
   "baseUrl": "https://reanime.to",
-  "searchBaseUrl": "https://reanime.to/api/search?q=",
+  "searchBaseUrl": "https://reanime.to/api/search?q=%s",
   "scriptUrl": "https://raw.githubusercontent.com/johnathansigma67/ShiroX-ReAnime/main/reanime.js",
   "type": "anime",
   "asyncJS": true,
