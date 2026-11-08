@@ -4,7 +4,7 @@
   "version": "0.3.0",
   "baseUrl": "https://reanime.to",
   "searchBaseUrl": "https://reanime.to/api/search?q=",
-  "scriptUrl": "REPLACE_WITH_RAW_GITHUB_URL/reanime.js",
+  "scriptUrl": ""scriptUrl": "https://raw.githubusercontent.com/johnathansigma67/ShiroX-ReAnime/main/reanime.js",",
   "type": "anime",
   "asyncJS": true,
   "streamType": "HLS/MP4",
