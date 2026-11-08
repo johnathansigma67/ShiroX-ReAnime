@@ -1,114 +1,135 @@
-/* Independent ReAnime ShiroX integration, experimental v0.3.0. Search tries both documented API routes.
-   Uses /api/search, /api/episodes, /api/watch. No credentials or telemetry. */
+
+/* ReAnime ShiroX experimental v0.4.0. No accounts or telemetry.
+ * Stream fallback for flix server discovery; NOT a verified FlixCloud decryptor.
+ */
 var ReAnimeNew = (function () {
   'use strict';
   var BASE = 'https://reanime.to';
-  function fail(s) { throw new Error('ReAnime New: ' + s); }
+  function fail(s) { throw new Error('ReAnime v0.4: ' + s); }
   function arr(x) { return Array.isArray(x) ? x : []; }
-  function validSlug(x) { return /^[a-z0-9][a-z0-9_-]*$/i.test(String(x || '')); }
-  function parseSlug(input) {
-    var s = String(input || '');
+  function pick(x, keys) { for (var i=0;i<keys.length;i++) if (x && x[keys[i]] != null) return x[keys[i]]; return null; }
+  function validSlug(s) { return /^[a-z0-9][a-z0-9_-]*$/i.test(String(s || '')); }
+  function slugOf(s) {
+    s = String(s || '');
     var m = s.match(/\/(?:anime|watch)\/([a-z0-9_-]+)/i);
     if (m) return m[1];
     if (validSlug(s)) return s;
-    fail('Invalid anime identifier');
+    fail('Invalid anime slug');
   }
-  function first(x, keys) { for (var i=0; i<keys.length; i++) if (x && x[keys[i]] != null) return x[keys[i]]; return null; }
-  function imageOf(item) {
-    var c = item.cover_image || item.coverImage || item.poster || item.image || {};
-    return typeof c === 'string' ? c : first(c, ['extra_large','large','medium','url']) || '';
-  }
-  function textTitle(item) {
-    var t = first(item, ['title','name','english_title']) || '';
-    return typeof t === 'string' ? t : first(t, ['english','romaji','native']) || '';
-  }
-  async function load(path) {
-    var url = BASE + path;
-    var res;
-    if (typeof fetchv2 === 'function') res = await fetchv2(url, {Accept:'application/json', Referer:BASE+'/'}, 'GET', null);
-    else if (typeof fetch === 'function') res = await fetch(url, {headers:{Accept:'application/json'}});
-    else fail('This app version has no HTTP API');
-    if (!res || !res.ok && !(res.status >= 200 && res.status < 300)) fail('HTTP ' + (res && res.status || '?') + ' for ' + path.split('?')[0]);
-    var body = await res.text();
-    try { return JSON.parse(body); } catch (_) { fail('Source returned non-JSON data for ' + path.split('?')[0]); }
-  }
-  function unwrap(data) {
-    if (Array.isArray(data)) return data;
-    if (data && typeof data === 'object') {
-      var child = first(data,['results','data','anime','animes','items','episodes']);
-      if (Array.isArray(child)) return child;
-      if (child && typeof child === 'object') return unwrap(child);
+  function titleOf(o) { var t = pick(o,['title','name','english_title']) || ''; return typeof t==='string'?t:pick(t,['english','romaji','native'])||''; }
+  function imageOf(o) { var c = pick(o,['cover_image','coverImage','poster','image']) || ''; return typeof c==='string'?c:pick(c,['extra_large','large','medium','url'])||''; }
+  function unwrap(x) {
+    if (Array.isArray(x)) return x;
+    if (x && typeof x==='object') {
+      var v = pick(x,['results','data','anime','animes','items','episodes']);
+      if (v) return unwrap(v);
     }
     return [];
   }
-  async function tryPaths(paths) {
-    var errors = [];
-    for (var i = 0; i < paths.length; i++) {
-      try { return await load(paths[i]); }
-      catch (e) { errors.push(paths[i].split('?')[0] + ': ' + String(e.message || e).slice(0, 100)); }
+  async function get(path) {
+    var res, url = BASE + path;
+    if (typeof fetchv2==='function') res = await fetchv2(url,{Accept:'application/json',Referer:BASE+'/'},'GET',null);
+    else if (typeof fetch==='function') res = await fetch(url,{headers:{Accept:'application/json',Referer:BASE+'/'}});
+    else fail('No HTTP transport');
+    if (!res || !(res.ok || res.status>=200 && res.status<300)) throw new Error('HTTP '+(res && res.status || '?')+' '+path.split('?')[0]);
+    var body = await res.text();
+    try { return JSON.parse(body); } catch(e) { throw new Error('Non-JSON '+path.split('?')[0]); }
+  }
+  async function routes(paths,label) {
+    var problems=[];
+    for(var i=0;i<paths.length;i++) {
+      try { return await get(paths[i]); }
+      catch(e) { problems.push(paths[i].split('?')[0]+': '+String(e.message||e).slice(0,80)); }
     }
-    fail('All API routes failed: ' + errors.join('; '));
+    fail(label+' failed: '+problems.join(' | '));
   }
   async function search(q) {
-    var term = String(q || '').trim();
-    if (!term) return JSON.stringify([]);
-    var data = await tryPaths(['/api/search?q=' + encodeURIComponent(term) + '&limit=20', '/api/v1/search?q=' + encodeURIComponent(term) + '&limit=20']);
-    var results = unwrap(data).map(function(item) {
-      var slug = first(item,['anime_id','slug','id']); if (typeof slug === 'number') slug = null;
-      if (!validSlug(slug)) return null;
-      return {title:String(textTitle(item)), image:String(imageOf(item)), href:String(slug)};
-    }).filter(function(x){return x && x.title;});
-    if (!results.length) {
-      if (typeof console !== 'undefined' && console.warn) console.warn('[ReAnime New] Search response returned no recognized titles.');
-    }
-    return JSON.stringify(results);
+    q = String(q||'').trim(); if(!q) return '[]';
+    var data=await routes(['/api/search?q='+encodeURIComponent(q)+'&limit=20','/api/v1/search?q='+encodeURIComponent(q)+'&limit=20'],'search');
+    return JSON.stringify(unwrap(data).map(function(x){
+      var s=pick(x,['anime_id','slug','id']);
+      return validSlug(s)?{title:String(titleOf(x)),image:String(imageOf(x)),href:String(s)}:null;
+    }).filter(function(x){return x && x.title;}));
   }
   async function details(href) {
-    var slug = parseSlug(href);
-    var watch = await tryPaths(['/api/watch/' + encodeURIComponent(slug) + '/1', '/api/v1/anime/' + encodeURIComponent(slug)]);
-    var anime = watch.anime || watch.data && watch.data.anime || watch;
-    return JSON.stringify([{ description:String(first(anime,['description','synopsis','summary']) || 'No description available'), aliases:'', airdate:'N/A' }]);
+    var slug=slugOf(href);
+    var data=await routes(['/api/v1/anime/'+encodeURIComponent(slug),'/api/watch/'+encodeURIComponent(slug)+'/1'],'details');
+    var anime=pick(data,['anime']) || data.data && data.data.anime || data;
+    return JSON.stringify([{description:String(pick(anime,['description','synopsis','summary'])||'No description available'),aliases:'',airdate:'N/A'}]);
   }
   async function episodes(href) {
-    var slug = parseSlug(href);
-    var data = await tryPaths(['/api/episodes/' + encodeURIComponent(slug), '/api/v1/anime/' + encodeURIComponent(slug) + '/episodes?limit=2000']);
-    var rows = unwrap(data); if (rows.length === 0 && Array.isArray(data)) rows = data;
-    return JSON.stringify(rows.map(function(item,i) {
-      var number = Number(first(item,['episode_number','episodeNumber','number','episode','ep']) || i+1);
-      return isFinite(number) && number>0 ? {number:number,href:slug+'|'+number} : null;
+    var slug=slugOf(href), data=await routes(['/api/episodes/'+encodeURIComponent(slug),'/api/v1/anime/'+encodeURIComponent(slug)+'/episodes?limit=2000'],'episodes');
+    return JSON.stringify(unwrap(data).map(function(x,i){
+      var n=Number(pick(x,['episode_number','episodeNumber','number','episode','ep'])||i+1);
+      return isFinite(n)&&n>0?{number:n,href:slug+'|'+n}:null;
     }).filter(Boolean));
   }
-  function playableUrl(s) {
-    return /^https:\/\/[^\s]+\.(?:m3u8|mp4)(?:[?#]|$)/i.test(String(s || ''));
+  function playable(u) {return /^https:\/\/[^\s]+\.(?:m3u8|mp4)(?:[?#]|$)/i.test(String(u||''));}
+  function streamsOf(data) {
+    var d=data && data.data || data || {};
+    var subs=arr(d.sub || d.subbed || d.subs);
+    var links=arr(pick(d,['episode_links','servers','sources','links']));
+    if (!subs.length) subs=links.filter(function(x){ return !/dub/i.test(String(x.dataType||x.type||'')); });
+    return subs;
+  }
+  function anilistId(data) {
+    var d=data&&data.data||data||{};
+    var anime=d.anime||{};
+    var id=pick(d,['anilist_id','anilistId','anilistID']) || pick(anime,['anilist_id','anilistId','anilistID']);
+    return /^\d+$/.test(String(id||'')) ? String(id) : null;
   }
   async function stream(href) {
-    var parts = String(href).split('|'), slug = parseSlug(parts[0]);
-    var ep = Number(parts[1]);
-    if (!isFinite(ep) || ep < 1) fail('Invalid episode');
-    var data = await tryPaths(['/api/watch/' + encodeURIComponent(slug) + '/' + ep, '/api/v1/watch/' + encodeURIComponent(slug) + '/' + ep]);
-    var links = arr(data.episode_links || data.servers || data.data && data.data.episode_links || data.data && data.data.servers); 
-    var mode = 'sub';
-    var choices = links.filter(function(item) { return /^(?:sub|s-sub)$/i.test(String(item.dataType || item.type || 'sub')); });
-    choices.sort(function(a,b){return (a.serverName==='HD-2'?-1:0)-(b.serverName==='HD-2'?-1:0);});
-    if (!choices.length) fail('No subtitle streams available');
-    if (typeof networkFetch !== 'function') fail('ShiroX does not support networkFetch for embedded players');
-    for (var i=0;i<Math.min(choices.length,3);i++) {
-      var link = String(choices[i].dataLink || choices[i].url || '');
-      if (!/^https:\/\//i.test(link)) continue;
-      if (playableUrl(link)) return JSON.stringify({streams:[{title:'SUB',streamUrl:link,headers:{Referer:BASE+'/'} }],subtitle:'',allSubtitles:[]});
+    var p=String(href||'').split('|'), slug=slugOf(p[0]), ep=Number(p[1]);
+    if(!Number.isInteger(ep)||ep<1) fail('Invalid episode number');
+    var encoded=encodeURIComponent(slug), attempts=[], links=[], id=null;
+    var candidates=[
+      '/api/flix/'+encoded+'/'+ep,
+      '/api/flix/'+encoded+'?episode='+ep,
+      '/api/watch/'+encoded+'/'+ep,
+      '/api/v1/watch/'+encoded+'/'+ep
+    ];
+    for(var i=0;i<candidates.length;i++) {
       try {
-        var cap = await networkFetch(link, {timeoutSeconds:14, headers:{Referer:BASE+'/'}, returnHTML:true, returnCookies:false, waitForSelectors:['video'], clickSelectors:['.art-icon-play[aria-label="Play"]','button[aria-label="Play"]'], maxWaitTime:4});
-        var urls = arr(cap && cap.requests).map(function(r){return typeof r==='string'?r:r&&r.url;});
-        if (cap && cap.cutoffUrl) urls.push(cap.cutoffUrl);
-        var media = urls.filter(playableUrl)[0];
-        if (media) return JSON.stringify({streams:[{title:'SUB '+String(choices[i].serverName||''),streamUrl:media,headers:{Referer:link.split('/').slice(0,3).join('/')+'/'} }],subtitle:'',allSubtitles:[]});
-      } catch(err) { if(typeof console !== 'undefined' && console.warn) console.warn('[ReAnime New] player capture failed: '+String(err.message||err).slice(0,140)); }
+        var d=await get(candidates[i]);
+        id=id||anilistId(d);
+        links=streamsOf(d);
+        if(links.length) break;
+        attempts.push(candidates[i]+' returned no sub servers');
+      }catch(e){attempts.push(String(e.message||e));}
     }
-    fail('Could not capture an HLS/MP4 media URL from the embedded player');
+    // Some ReAnime builds use the numeric AniList identifier in /api/flix.
+    if(!links.length) {
+      try {
+        var meta=await get('/api/v1/anime/'+encoded);
+        id=id||anilistId(meta);
+      }catch(e){attempts.push('AniList ID lookup: '+String(e.message||e));}
+      if(id) {
+        try { links=streamsOf(await get('/api/flix/'+id+'/'+ep)); }
+        catch(e){attempts.push('numeric /api/flix: '+String(e.message||e));}
+      }
+    }
+    if(!links.length) fail('No subtitle servers. '+attempts.slice(-4).join(' | '));
+    links.sort(function(a,b){return Number(b.serverName==='HD-2')-Number(a.serverName==='HD-2');});
+    var captureErrors=[];
+    for(var j=0;j<Math.min(links.length,4);j++) {
+      var link=String(pick(links[j],['dataLink','url','link','src'])||'');
+      if(!/^https:\/\//i.test(link)) continue;
+      if(playable(link)) return JSON.stringify({streams:[{title:'ReAnime SUB',streamUrl:link,headers:{Referer:BASE+'/'}}],subtitle:'',allSubtitles:[]});
+      if(typeof networkFetch!=='function') fail('Found an embedded player, but this ShiroX build lacks networkFetch.');
+      try {
+        var cap=await networkFetch(link,{timeoutSeconds:20,headers:{Referer:BASE+'/'},returnHTML:true,returnCookies:false,waitForSelectors:['video'],clickSelectors:['.art-icon-play[aria-label="Play"]','button[aria-label="Play"]'],maxWaitTime:5});
+        var urls=arr(cap&&cap.requests).map(function(r){return typeof r==='string'?r:r&&r.url;});
+        if(cap&&cap.cutoffUrl) urls.push(cap.cutoffUrl);
+        var media=urls.filter(playable)[0];
+        if(media) return JSON.stringify({streams:[{title:'ReAnime SUB',streamUrl:media,headers:{Referer:link.split('/').slice(0,3).join('/')+'/'}}],subtitle:'',allSubtitles:[]});
+        captureErrors.push('No .m3u8/.mp4 captured from '+link.split('/')[2]);
+      }catch(e){captureErrors.push(String(e.message||e).slice(0,90));}
+    }
+    fail('Found embed server, but no playable URL. '+captureErrors.join(' | ')+'; FlixCloud may require a separate resolver.');
   }
-  return {search:search, details:details, episodes:episodes, stream:stream};
+  return {search:search,details:details,episodes:episodes,stream:stream};
 })();
-async function searchResults(query) {return await ReAnimeNew.search(query);}
-async function extractDetails(href) {return await ReAnimeNew.details(href);}
-async function extractEpisodes(href) {return await ReAnimeNew.episodes(href);}
-async function extractStreamUrl(href) {return await ReAnimeNew.stream(href);}
+async function searchResults(query){return await ReAnimeNew.search(query);}
+async function extractDetails(href){return await ReAnimeNew.details(href);}
+async function extractEpisodes(href){return await ReAnimeNew.episodes(href);}
+async function extractStreamUrl(href){return await ReAnimeNew.stream(href);}
